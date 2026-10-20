@@ -1,0 +1,27 @@
+show all
+load "samples/mixed.pim"
+show all
+create PLAIN_TEXT text="Demo note"
+create PLAIN_TEXT text="Demo note"
+n
+define type = TASK && description ~ "COMP3211" && deadline < "2026-11-22 00:00"
+search @C1
+update 2 deadline="2026-11-25 23:59"
+search @C1
+search type = TASK || unknown ~ "x"
+delete 12
+n
+delete 12
+y
+save "demo_session.pim"
+save "demo_session.pim"
+n
+update 1 text="Unsaved demo change"
+load "missing_demo.pim"
+d
+show 1
+exit
+c
+exit
+s
+"demo_final.pim"
