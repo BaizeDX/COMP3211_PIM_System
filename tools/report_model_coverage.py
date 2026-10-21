@@ -3,8 +3,11 @@
 import argparse
 import dis
 import hashlib
+import io
+import os
 import platform
 import shlex
+import subprocess
 import sys
 import trace
 import unittest
@@ -101,6 +104,10 @@ def _report(rows: list[dict], tests: int, command: str) -> str:
 
 
 def main() -> int:
+    # Report paths/test failures can contain Unicode even with ANSI redirection.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors=stream.errors)
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -116,7 +123,8 @@ def main() -> int:
     if not result.wasSuccessful():
         return 1  # Never publish successful coverage over failing tests.
     rows = _inventory(root / "model", tracer.results().counts)
-    command = shlex.join([sys.executable, *sys.argv])
+    arguments = [sys.executable, *sys.argv]
+    command = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(_report(rows, result.testsRun, command), encoding="utf-8")
     print(f"Model line coverage written to {args.output}")

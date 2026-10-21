@@ -1,5 +1,6 @@
 """Terminal input/output and complete record formatting (Design section 8)."""
 
+import io
 import re
 import sys
 from datetime import datetime
@@ -11,11 +12,35 @@ from model.records import PIR
 from model.search import SavedCriterion
 
 
+def _configure_stdio() -> None:
+    """Use UTF-8 before the first input read, without replacing embedded streams.
+
+    Windows console streams already support Unicode, but redirected streams
+    can otherwise inherit an ANSI code page. Retain native newlines/error policies.
+    A debugger may already have read stdin; never replace its buffered stream.
+    Such hosts must select UTF-8 before reading (for example, -X utf8 with pdb).
+    """
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, name)
+        if isinstance(stream, io.TextIOWrapper) and (
+            stream.encoding.lower().replace("-", "").replace("_", "") != "utf8"
+        ):
+            try:
+                stream.reconfigure(encoding="utf-8", errors=stream.errors)
+            except io.UnsupportedOperation:
+                if name != "stdin":
+                    raise
+                # Reconfiguring consumed input is forbidden. Keep decoder/buffer
+                # ownership with the debugger rather than losing pending input.
+
+
 class PIMView:
     """Stateless terminal adapter; input interruptions propagate to the controller."""
 
     def read_line(self, prompt: str = "pim> ") -> str:
-        return input(prompt)
+        # input() removes LF; a redirected CRLF stream can retain its final CR.
+        # Remove only that transport suffix, never whitespace within literals.
+        return input(prompt).removesuffix("\r")
 
     def confirm(self, message: str) -> bool:
         while True:

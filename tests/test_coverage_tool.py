@@ -20,6 +20,38 @@ class CoverageToolTests(unittest.TestCase):
         self.model = self.root / "model"
         self.model.mkdir()
 
+    def test_unicode_project_and_output_paths_with_legacy_stream_encoding(self):
+        """A completed measurement must not crash while printing a Unicode report path."""
+        project = self.root / "项目 source"
+        tools, tests, model = (project / name for name in ("tools", "tests", "model"))
+        for directory in (tools, tests, model):
+            directory.mkdir(parents=True)
+        source = Path(__file__).resolve().parents[1] / "tools/report_model_coverage.py"
+        shutil.copyfile(source, tools / source.name)
+        (tests / "__init__.py").write_text("", encoding="utf-8")
+        (model / "__init__.py").write_text("", encoding="utf-8")
+        (model / "sample.py").write_text("def result():\n    return '中文'\n", encoding="utf-8")
+        for name in _MODEL_TEST_MODULES:
+            (tests / f"{name}.py").write_text("", encoding="utf-8")
+        (tests / "test_errors.py").write_text(
+            "import unittest\nclass Example(unittest.TestCase):\n"
+            "    def test_example(self):\n"
+            "        from model.sample import result\n"
+            "        self.assertEqual(result(), '中文')\n", encoding="utf-8"
+        )
+        report = self.root / "结果 reports" / "覆盖.md"
+        result = subprocess.run(
+            [sys.executable, "-B", str(tools / source.name), "--output", str(report)],
+            cwd=self.root, capture_output=True, timeout=15,
+            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="0",
+                     PYTHONIOENCODING="cp1252:strict"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertIn(str(report), result.stdout.decode("utf-8"))
+        text = report.read_text(encoding="utf-8")
+        self.assertIn("model/sample.py | 2 | 2 | 100.00% | None", text)
+        self.assertIn("Measured model unit tests: 1; all passed.", text)
+
     def test_executed_partial_and_completely_unexecuted_modules(self):
         """A never-imported file still contributes all executable lines to the denominator."""
         used = self.model / "used.py"
@@ -37,7 +69,7 @@ class CoverageToolTests(unittest.TestCase):
         namespace = {"__file__": str(used)}
 
         def run():
-            exec(compile(used.read_text(), str(used), "exec"), namespace)
+            exec(compile(used.read_text(encoding="utf-8"), str(used), "exec"), namespace)
             self.assertEqual(namespace["choose"](True), 10)
 
         tracer.runfunc(run)
@@ -92,13 +124,13 @@ class CoverageToolTests(unittest.TestCase):
         report.write_text("earlier evidence", encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(tools / source.name)], cwd=self.root,
-            text=True, capture_output=True, timeout=5,
+            text=True, encoding="utf-8", capture_output=True, timeout=15,
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("FAILED", result.stderr)
         self.assertNotIn("coverage written", result.stdout)
-        self.assertEqual(report.read_text(), "earlier evidence")
+        self.assertEqual(report.read_text(encoding="utf-8"), "earlier evidence")
 
     def test_tracing_resumes_for_next_test_after_trace_hook_is_disabled(self):
         """A test disabling tracing must not silently remove later modules from measured hits."""
@@ -122,11 +154,13 @@ class CoverageToolTests(unittest.TestCase):
         )
         result = subprocess.run(
             [sys.executable, str(tools / source.name)], cwd=self.root,
-            text=True, capture_output=True, timeout=5,
+            text=True, encoding="utf-8", capture_output=True, timeout=15,
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        report = (self.root / "supporting" / "evidence" / "MODEL_LINE_COVERAGE.md").read_text()
+        report = (self.root / "supporting" / "evidence" / "MODEL_LINE_COVERAGE.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("model/sample.py | 2 | 2 | 100.00% | None", report)
 
 

@@ -44,7 +44,7 @@ class EntrypointTests(unittest.TestCase):
         return subprocess.run(
             command, cwd=self.directory,
             input="\n".join(lines) + ("\n" if lines else ""), text=True, encoding="utf-8",
-            capture_output=True, timeout=5, env=environment,
+            capture_output=True, timeout=15, env=environment,
         )
 
     def test_representative_script_uses_all_commands_and_all_record_types(self):

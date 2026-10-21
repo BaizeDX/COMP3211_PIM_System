@@ -79,6 +79,46 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(loaded[1].deadline, datetime(1, 1, 1))
         self.assertEqual(loaded[-1].mobile, "+00123")
 
+    def test_unicode_space_paths_crlf_json_and_closed_read_handle(self):
+        """Native Unicode/space paths and CRLF JSON round-trip; read releases its handle."""
+        directory = self.directory / "资料 文件"
+        directory.mkdir()
+        path = directory / "记录 中文.pim"
+        self.store.write(path, self.records)
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        loaded = self.store.read(path)
+        self.assertEqual(loaded, tuple(sorted(self.records, key=lambda record: record.id)))
+        moved = directory / "改名 记录.pim"
+        path.rename(moved)
+        moved.unlink()
+        self.assertEqual(list(directory.iterdir()), [])
+
+    def test_failed_staging_closes_handle_before_cleanup(self):
+        """A Windows unlink must never be attempted while our temporary handle is open."""
+        self.path.write_bytes(b"original")
+        original_factory = tempfile.NamedTemporaryFile
+        original_unlink = Path.unlink
+        handles, cleaned = [], []
+
+        def factory(**kwargs):
+            actual = original_factory(**kwargs)
+            handles.append(actual)
+            return _FaultyTemporary(actual, "flush")
+
+        def cleanup(path, *args, **kwargs):
+            self.assertTrue(handles[-1].closed)
+            cleaned.append(path)
+            return original_unlink(path, *args, **kwargs)
+
+        with patch("model.persistence.tempfile.NamedTemporaryFile", side_effect=factory), patch(
+            "model.persistence.Path.unlink", autospec=True, side_effect=cleanup
+        ):
+            with self.assertRaises(PersistenceError):
+                self.store.write(self.path, self.records, overwrite=True)
+        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(self.path.read_bytes(), b"original")
+        self.assertEqual(list(self.directory.iterdir()), [self.path])
+
     def test_exact_schema_encoding_and_fixed_key_order(self):
         """D 9.2/R9: UTF-8 without BOM, direct Unicode and canonical numeric order."""
         self.store.write(self.path, self.records)
@@ -105,7 +145,7 @@ class StorageTests(unittest.TestCase):
         """FR22/FR24: an empty records array is valid, unlike an empty file."""
         self.store.write(self.path, ())
         self.assertEqual(self.store.read(self.path), ())
-        self.assertEqual(json.loads(self.path.read_text())["records"], [])
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["records"], [])
         self.path.write_bytes(b"")
         with self.assertRaises(PersistenceError):
             self.store.read(self.path)
@@ -262,7 +302,7 @@ class StorageTests(unittest.TestCase):
     def test_every_record_field_set_and_primitive_value_is_validated(self):
         """D 9.3: required/unknown fields and wrong business-value types all reject."""
         self.store.write(self.path, self.records)
-        valid_entries = json.loads(self.path.read_text())["records"]
+        valid_entries = json.loads(self.path.read_text(encoding="utf-8"))["records"]
         for entry in valid_entries:
             for key in entry:
                 candidate = dict(entry)

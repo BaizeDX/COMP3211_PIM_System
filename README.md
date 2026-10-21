@@ -19,14 +19,37 @@ On the verified local environment:
 python3.12 -X utf8 -B main.py
 ```
 
-Windows launch command, not yet verified on Windows:
+Windows PowerShell commands, not yet verified on a real Windows machine:
 
-```text
+```powershell
+Set-Location "C:\Work\COMP3211 Group Project"
+py -0p
+py -3.12 -c "import sys; print(sys.version); print(sys.executable)"
 py -3.12 -X utf8 -B main.py
 ```
 
+Replace the example folder with your extracted project root. If the py launcher
+is unavailable, check that python selects Python 3.12:
+
+```powershell
+python -c "import sys; print(sys.version); print(sys.executable)"
+python -X utf8 -B main.py
+```
+
+If necessary, use the actual installed interpreter's full path (PowerShell
+requires & before a quoted executable path):
+
+```powershell
+& "C:\Path\To\Python312\python.exe" -X utf8 -B main.py
+```
+
+Use the same verified interpreter for tests and coverage. No IDE is required.
+
 Use Python 3.12 and check the installed patch version. The -B option avoids
-creating Python bytecode cache files.
+creating Python bytecode cache files. Startup initializes native standard text
+streams as UTF-8 and normalizes LF/CRLF input line endings; -X utf8 also keeps
+the interpreter's other text defaults explicit. Redirected input must be UTF-8.
+The application keeps native output newline conventions.
 
 ## Example session
 
@@ -75,10 +98,56 @@ py -3.12 -B -m unittest discover -s tests -p "test_*.py" -v
 py -3.12 -B tools/report_model_coverage.py --output "coverage/model_line_coverage.md"
 ```
 
-Latest completed local verification on 20 October 2026: **258 tests passed**.
-The separate **181-model-test** run covered **664/666 executable model lines
+Latest local verification on 21 October 2026: **272 tests run, 271 passed,
+1 Windows-only test skipped**, with no failures or errors. The skipped case
+requires a real Windows filesystem to reject an invalid Windows filename.
+The separate **183-model-test** run covered **664/666 executable model lines
 (99.70%)**. Uncovered lines were model/search.py:189 and model/validation.py:16.
 These results were obtained on macOS and do not establish Windows compatibility.
+
+## File paths on Windows and macOS
+
+Relative application paths use the terminal's current working directory.
+Launching main.py by an absolute path does not change that directory. Open the
+terminal in the project root when using the supplied sample paths.
+
+For example, create a writable data directory in PowerShell before launching:
+
+```powershell
+New-Item -ItemType Directory -Force "资料 文件"
+py -3.12 -X utf8 -B main.py
+```
+
+Then enter these commands at pim>, one per line:
+
+```text
+create PLAIN_TEXT text="中文 note"
+save "资料 文件/记录.pim"
+load "资料 文件/记录.pim"
+```
+
+On Windows, save "资料 文件\\记录.pim" names the same file and asks for overwrite
+confirmation if it exists. Inside application quotes, double each literal
+backslash; forward slashes avoid this extra escaping. Only escaped quotes and
+escaped backslashes are supported. This literal grammar is unchanged.
+The application does not create missing directories. macOS users can create
+the directory with mkdir -p "资料 文件" before launch and use forward-slash paths.
+
+When piping Unicode commands from Windows PowerShell, configure its encoding
+before the pipeline; otherwise the shell may corrupt text before Python reads it:
+
+```powershell
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+'create PLAIN_TEXT text="未保存"' | py -3.12 -X utf8 -B main.py
+$LASTEXITCODE
+```
+
+The closed-input example must report unsaved changes on stderr and return 1;
+it does not save or discard by confirmation. For normal interactive exit, use
+exit and the documented save/discard/cancel responses. Ctrl-C at an input or
+confirmation boundary cancels pending input and retains existing changes.
 
 ## Repository structure
 
