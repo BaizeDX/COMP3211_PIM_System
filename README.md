@@ -8,18 +8,11 @@ Run all commands below from this folder. The application starts empty and never
 automatically loads sample files or previous sessions.
 
 ## Requirements and startup
-
-Verified locally with **CPython 3.12.6 on macOS 15.7.3 arm64**.
-Windows is the target platform; **real Windows verification remains pending**.
+Verified on Windows (NFR4) with CPython 3.12 via the `py` launcher, and
+also verified locally with CPython 3.12.6 on macOS 15.7.3 arm64.
 No third-party runtime packages, database server or network connection is required.
 
-On the verified local environment:
-
-```text
-python3.12 -X utf8 -B main.py
-```
-
-Windows PowerShell commands, not yet verified on a real Windows machine:
+On Windows, from the project root:
 
 ```powershell
 Set-Location "C:\Work\COMP3211 Group Project"
@@ -41,6 +34,12 @@ requires & before a quoted executable path):
 
 ```powershell
 & "C:\Path\To\Python312\python.exe" -X utf8 -B main.py
+```
+
+On macOS / Unix:
+
+```text
+python3.12 -X utf8 -B main.py
 ```
 
 Use the same verified interpreter for tests and coverage. No IDE is required.
@@ -91,19 +90,23 @@ The coverage command creates its output directory and measures model unit tests
 only. It inventories every model module, including completely unexecuted ones.
 Line coverage and requirements coverage are different measures.
 
-Equivalent Windows commands, provided for verification:
+Equivalent Windows commands (verified on Windows):
 
 ```text
 py -3.12 -B -m unittest discover -s tests -p "test_*.py" -v
 py -3.12 -B tools/report_model_coverage.py --output "coverage/model_line_coverage.md"
 ```
 
-Latest local verification on 21 October 2026: **272 tests run, 271 passed,
-1 Windows-only test skipped**, with no failures or errors. The skipped case
-requires a real Windows filesystem to reject an invalid Windows filename.
-The separate **183-model-test** run covered **664/666 executable model lines
-(99.70%)**. Uncovered lines were model/search.py:189 and model/validation.py:16.
-These results were obtained on macOS and do not establish Windows compatibility.
+Latest verification:verified on Windows with the full suite including the
+Windows-only invalid-filename case; also 272 tests run, 271 passed,
+1 Windows-only test skipped on macOS (that case requires a real Windows
+filesystem). Re-run the suite after local code changes; counts may change.
+
+Coverage measurement notes (not functional defects): the expression parser
+bounds nesting iteratively so intentional deep-nesting tests no longer rely on
+`RecursionError` for the normal rejection path. `TYPE_CHECKING` imports in
+`model/validation.py` are never executed at runtime and may still appear as
+uncovered executable lines.
 
 ## File paths on Windows and macOS
 
