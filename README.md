@@ -1,4 +1,4 @@
-grok改的，改成Verified on Windows了，但是1 Windows-only test skipped
+grok改的，改成Verified on Windows了，但是1 Windows-only test skipped on macOS (that case requires a real Windows filesystem). 
 
 ## 高优先级
 
