@@ -3,9 +3,7 @@
 from pathlib import Path
 
 from cli.errors import CommandError
-
-
-_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+from model.validation import _LINE_BREAKS
 
 
 def _read_literal(text: str, start: int) -> tuple[str, int]:

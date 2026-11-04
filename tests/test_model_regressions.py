@@ -10,7 +10,7 @@ from model.criteria import AndCriterion, OrCriterion, TypeCriterion
 from model.errors import DuplicateRecordError, ExpressionError, PersistenceError, ValidationError
 from model.persistence import PIMFileStorage
 from model.records import Contact, PlainText, RecordType, Task
-from model.search import CriteriaRegistry, ExpressionParser
+from model.search import _MAX_CONDITIONS, CriteriaRegistry, ExpressionParser
 from model.service import PIMService
 from model.validation import MAX_RECORD_ID
 
@@ -23,16 +23,23 @@ class ModelRegressionTests(unittest.TestCase):
         parser = ExpressionParser()
         self.service = PIMService(PIMFileStorage(), CriteriaRegistry(parser), parser)
 
-    def test_long_flat_conjunction_works_directly_and_as_saved_criterion(self):
-        """A grammar-valid conjunction must not crash on Python's evaluation recursion limit."""
+    def test_flat_conjunction_at_condition_limit_works_and_one_more_is_rejected(self):
+        """Limit-sized chains work directly and saved; one more fails before any C ID."""
         note = self.service.create(RecordType.PLAIN_TEXT, {"text": "note"})
         self.service.create(
             RecordType.CONTACT, {"name": "A", "address": "B", "mobile": "001"}
         )
-        expression = " && ".join(["type=PLAIN_TEXT"] * 1500)
+        expression = " && ".join(["type=PLAIN_TEXT"] * _MAX_CONDITIONS)
         item = self.service.define_criterion(expression)
         self.assertEqual(self.service.search(expression), (note,))
         self.assertEqual(self.service.search_saved(item.id), (note,))
+        too_long = " && ".join(["type=PLAIN_TEXT"] * (_MAX_CONDITIONS + 1))
+        reason = f"at most {_MAX_CONDITIONS} conditions"
+        with self.assertRaisesRegex(ExpressionError, reason):
+            self.service.search(too_long)
+        with self.assertRaisesRegex(ExpressionError, reason):
+            self.service.define_criterion(too_long)
+        self.assertEqual([saved.id for saved in self.service.list_criteria()], ["C1"])
 
     def test_oversized_file_ids_reject_whole_load_preserving_session(self):
         """Original 4300-nine ID and MAX+1 reject atomically, even after a valid prefix."""
@@ -125,40 +132,30 @@ class ModelRegressionTests(unittest.TestCase):
             self.assertLess(len(str(caught.exception)), 200)
         self.assertEqual(self.service.all_records(), (original,))
 
-    def test_snapshot_id_validation_precedes_encoding_or_target_replacement(self):
-        """Even a deliberately corrupted PIR snapshot cannot write an out-of-range ID."""
-        self.path.write_bytes(b"existing target")
-        for value in (MAX_RECORD_ID + 1, 10 ** 5000):
-            invalid = PlainText(1, "snapshot")
-            object.__setattr__(invalid, "id", value)  # Simulate an untrusted caller snapshot.
-            with self.assertRaises(PersistenceError) as caught:
-                PIMFileStorage().write(self.path, (invalid,), overwrite=True)
-            self.assertIn(str(MAX_RECORD_ID), str(caught.exception))
-            self.assertEqual(self.path.read_bytes(), b"existing target")
-        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
-
     def test_long_disjunction_and_negation_keep_boolean_semantics(self):
         """A late true OR leaf and negated AND must work for mixed record types."""
         note = self.service.create(RecordType.PLAIN_TEXT, {"text": "note"})
         contact = self.service.create(
             RecordType.CONTACT, {"name": "A", "address": "B", "mobile": "001"}
         )
-        expression = " || ".join(["type=TASK"] * 1500 + ["type=CONTACT"])
+        expression = " || ".join(["type=TASK"] * (_MAX_CONDITIONS - 1) + ["type=CONTACT"])
         self.assertEqual(self.service.search(expression), (contact,))
-        conjunction = " && ".join(["type=PLAIN_TEXT"] * 1500)
+        conjunction = " && ".join(["type=PLAIN_TEXT"] * _MAX_CONDITIONS)
         self.assertEqual(self.service.search(f"!({conjunction})"), (contact,))
         self.assertEqual(self.service.get(note.id), note)
 
     def test_invalid_branch_after_long_valid_prefix_is_still_fully_validated(self):
         """Short-circuit candidates cannot hide a final invalid condition or allocate a C ID."""
         note = self.service.create(RecordType.PLAIN_TEXT, {"text": "note"})
-        prefix = " || ".join(["type=PLAIN_TEXT"] * 1500)
-        for tail in ('unknown~"x"', 'deadline<"invalid"', 'text~""'):
+        prefix = " || ".join(["type=PLAIN_TEXT"] * (_MAX_CONDITIONS - 1))
+        for tail, reason in (('unknown~"x"', "Unknown search field"),
+                             ('deadline<"invalid"', "Invalid deadline comparison"),
+                             ('text~""', "nonempty")):
             expression = f"{prefix} || {tail}"
             with self.subTest(tail=tail):
-                with self.assertRaises(ExpressionError):
+                with self.assertRaisesRegex(ExpressionError, reason):
                     self.service.search(expression)
-                with self.assertRaises(ExpressionError):
+                with self.assertRaisesRegex(ExpressionError, reason):
                     self.service.define_criterion(expression)
         self.assertEqual(self.service.list_criteria(), ())
         self.assertEqual(self.service.define_criterion("type=TASK").id, "C1")

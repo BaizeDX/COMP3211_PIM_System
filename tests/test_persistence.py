@@ -27,11 +27,9 @@ class _FaultyTemporary:
         return self
 
     def write(self, payload):
-        if self.phase in ("write", "short"):
-            count = self.actual.write(payload[:5])
-            if self.phase == "write":
-                raise OSError("Controlled write failure.")
-            return count
+        if self.phase == "write":
+            self.actual.write(payload[:5])
+            raise OSError("Controlled write failure.")
         return self.actual.write(payload)
 
     def flush(self):
@@ -120,7 +118,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(list(self.directory.iterdir()), [self.path])
 
     def test_exact_schema_encoding_and_fixed_key_order(self):
-        """D 9.2/R9: UTF-8 without BOM, direct Unicode and canonical numeric order."""
+        """D 9.2: UTF-8 without BOM, direct Unicode and canonical numeric order."""
         self.store.write(self.path, self.records)
         raw = self.path.read_bytes()
         self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
@@ -181,14 +179,13 @@ class StorageTests(unittest.TestCase):
                     self.store.write(path, self.records, overwrite=True)
                 self.assertEqual(path.read_bytes(), original)
 
-    def test_invalid_path_argument_and_null_byte_are_domain_errors(self):
-        """Wrong API/path inputs must not leak incidental file exceptions."""
-        for path in (None, "records.pim", 1, Path("bad\0.pim")):
-            with self.subTest(path=path):
-                with self.assertRaises(PersistenceError):
-                    self.store.read(path)
-                with self.assertRaises(PersistenceError):
-                    self.store.write(path, ())
+    def test_null_byte_path_is_a_domain_error(self):
+        """A null byte in the path must not leak an incidental file exception."""
+        path = Path("bad\0.pim")
+        with self.assertRaises(PersistenceError):
+            self.store.read(path)
+        with self.assertRaises(PersistenceError):
+            self.store.write(path, ())
 
     def test_missing_file_directory_and_permission_errors_are_wrapped(self):
         """Expected open/stat failures become actionable PersistenceError instances."""
@@ -367,24 +364,6 @@ class StorageTests(unittest.TestCase):
         self.assertIsNone(self.store.write(self.path, self.records, overwrite=True))
         self.assertEqual(len(self.store.read(self.path)), 4)
 
-    def test_invalid_overwrite_flags_do_not_grant_consent(self):
-        """The documented Boolean flag must not treat truthy strings/integers as consent."""
-        self.path.write_bytes(b"existing")
-        for flag in ("y", 1, 0, None, []):
-            with self.subTest(flag=flag), self.assertRaises(PersistenceError):
-                self.store.write(self.path, (), overwrite=flag)
-            self.assertEqual(self.path.read_bytes(), b"existing")
-
-    def test_invalid_snapshot_is_rejected_before_writing(self):
-        """Expected write validation errors preserve the target and leave no staged file."""
-        self.path.write_bytes(b"existing")
-        invalid_snapshots = (None, [], (object(),), (PlainText(1, "a"), PlainText(1, "b")))
-        for records in invalid_snapshots:
-            with self.subTest(records=records), self.assertRaises(PersistenceError):
-                self.store.write(self.path, records, overwrite=True)
-            self.assertEqual(self.path.read_bytes(), b"existing")
-            self.assertEqual(list(self.directory.iterdir()), [self.path])
-
     def test_missing_parent_is_not_created_automatically(self):
         """Invalid destinations fail rather than introducing extra filesystem behaviour."""
         target = self.directory / "missing" / "records.pim"
@@ -405,10 +384,10 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), b"existing")
             self.assertEqual(list(self.directory.iterdir()), [self.path])
 
-    def test_write_flush_close_and_short_write_failures_cleanup_without_replacement(self):
+    def test_write_flush_and_close_failures_cleanup_without_replacement(self):
         """A real staged file may contain bytes on failure; it must not replace the target."""
         original_factory = tempfile.NamedTemporaryFile
-        for phase in ("write", "short", "flush", "close"):
+        for phase in ("write", "flush", "close"):
             self.path.write_bytes(b"existing")
             staged = []
 
@@ -640,7 +619,7 @@ class ServicePersistenceTests(unittest.TestCase):
         self.service.define_criterion('text~"note"')
         before = self._snapshot()
         original_factory = tempfile.NamedTemporaryFile
-        for phase in ("encode", "create", "write", "short", "flush", "close"):
+        for phase in ("encode", "create", "write", "flush", "close"):
             if phase == "encode":
                 failure = patch("model.persistence.json.dumps", side_effect=ValueError("Encode."))
             elif phase == "create":

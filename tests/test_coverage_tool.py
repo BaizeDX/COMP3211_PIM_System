@@ -9,7 +9,9 @@ import trace
 import unittest
 from pathlib import Path
 
-from tools.report_model_coverage import _MODEL_TEST_MODULES, _inventory, _report
+from tools.report_model_coverage import (
+    _MODEL_TEST_MODULES, _executable_lines, _inventory, _report,
+)
 
 
 class CoverageToolTests(unittest.TestCase):
@@ -91,6 +93,19 @@ class CoverageToolTests(unittest.TestCase):
             (str(self.root / "cli.py"), 2): 100,
         })
         self.assertEqual((rows[0]["covered"], rows[0]["total"], rows[0]["missing"]), (1, 1, []))
+
+    def test_annotate_child_code_objects_are_not_executable_lines(self):
+        """Lazy annotation bodies (Python 3.14+) never run under tests; sibling code counts."""
+        code = compile(
+            'value = 1\n'
+            'def __annotate__(format):\n'
+            '    return {"value": int}\n'
+            'def kept():\n'
+            '    return value\n', "sample.py", "exec",
+        )
+        children = {c.co_name for c in code.co_consts if isinstance(c, type(code))}
+        self.assertEqual(children, {"__annotate__", "kept"})
+        self.assertEqual(_executable_lines(code), {1, 2, 4, 5})
 
     def test_report_aggregate_uses_line_totals_instead_of_average_percentages(self):
         """Two modules with 1/1 and 0/3 coverage total 1/4 (25%), not 50%."""

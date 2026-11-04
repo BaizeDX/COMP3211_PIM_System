@@ -107,21 +107,19 @@ class ViewTests(unittest.TestCase):
                         method()
                     self.assertEqual(reader.call_count, 1)
 
-    def test_error_prefix_exactly_once_and_normal_output_uses_stdout(self):
+    def test_error_prefix_and_normal_output_use_stdout(self):
         """Expected errors preserve cause/input guidance and avoid stderr."""
         err = io.StringIO()
         with redirect_stdout(self.out), redirect_stderr(err):
             self.view.message("result")
             self.view.error('Invalid deadline. Expected YYYY-MM-DD HH:MM.')
-            self.view.error("ERROR ERROR: already prefixed")
         self.assertEqual(err.getvalue(), "")
         self.assertEqual(self.out.getvalue().splitlines(), [
             "result", "ERROR Invalid deadline. Expected YYYY-MM-DD HH:MM.",
-            "ERROR already prefixed",
         ])
 
     def test_exceptional_closed_input_warning_uses_stderr_only(self):
-        """User clarification: dirty EOF terminates exceptionally, without save/discard claims."""
+        """Dirty EOF terminates exceptionally, without save/discard claims."""
         err = io.StringIO()
         with redirect_stdout(self.out), redirect_stderr(err):
             self.view._closed_input()

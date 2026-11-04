@@ -23,9 +23,10 @@ _MODEL_TEST_MODULES = (
 
 def _executable_lines(code: CodeType) -> set[int]:
     """Count distinct positive bytecode source lines recursively, not comments/blank lines."""
-    lines = {line for _, line in dis.findlinestarts(code) if line > 0}
+    lines = {line for _, line in dis.findlinestarts(code) if line is not None and line > 0}
     for constant in code.co_consts:
-        if isinstance(constant, CodeType):
+        # Python 3.14+ lazy annotation functions run only when annotations are read.
+        if isinstance(constant, CodeType) and constant.co_name != "__annotate__":
             lines.update(_executable_lines(constant))
     return lines
 
@@ -96,7 +97,7 @@ def _report(rows: list[dict], tests: int, command: str) -> str:
         )
     lines.extend([
         "", "Working verification evidence only. The required-format formal Testing",
-        "report remains a separate handoff artifact. No Windows execution is claimed.",
+        "report is a separate document. No Windows execution is claimed.",
         "", "## Source snapshot", "",
     ])
     lines.extend(f'- {row["path"]}: {row["sha256"]}' for row in rows)

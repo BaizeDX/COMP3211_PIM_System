@@ -29,10 +29,6 @@ class TypeCriterion(SearchCriterion):
 
     expected_type: RecordType
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.expected_type, RecordType):
-            raise ExpressionError("Type condition requires a supported RecordType.")
-
     def matches(self, record: PIR) -> bool:
         return record.type == self.expected_type
 
@@ -45,11 +41,11 @@ class TextCriterion(SearchCriterion):
     substring: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.field, str) or self.field not in _TEXT_FIELDS:
+        if self.field not in _TEXT_FIELDS:
             raise ExpressionError(
                 "Text conditions require text, description, name, address or mobile."
             )
-        if not isinstance(self.substring, str) or not self.substring:
+        if not self.substring:
             raise ExpressionError("Search substring must be nonempty text.")
         if any(character in _LINE_BREAKS for character in self.substring):
             raise ExpressionError("Search substring must not contain line breaks.")
@@ -68,7 +64,7 @@ class TimeCriterion(SearchCriterion):
     time_value: datetime
 
     def __post_init__(self) -> None:
-        if not isinstance(self.field, str) or self.field not in _TIME_FIELDS:
+        if self.field not in _TIME_FIELDS:
             raise ExpressionError("Time conditions require deadline, start or alarm.")
         if self.operator not in ("<", ">", "="):
             raise ExpressionError("Time comparison operator must be <, > or =.")
@@ -89,11 +85,6 @@ class TimeCriterion(SearchCriterion):
         return value == self.time_value
 
 
-def _require_child(child: SearchCriterion) -> None:
-    if not isinstance(child, SearchCriterion):
-        raise ExpressionError("Logical operands must be SearchCriterion objects.")
-
-
 @dataclass(frozen=True, slots=True)
 class AndCriterion(SearchCriterion):
     """Own two valid criteria and evaluate their conjunction with short-circuiting."""
@@ -101,12 +92,8 @@ class AndCriterion(SearchCriterion):
     left: SearchCriterion
     right: SearchCriterion
 
-    def __post_init__(self) -> None:
-        _require_child(self.left)
-        _require_child(self.right)
-
     def matches(self, record: PIR) -> bool:
-        return _evaluate(self, record)
+        return self.left.matches(record) and self.right.matches(record)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,12 +103,8 @@ class OrCriterion(SearchCriterion):
     left: SearchCriterion
     right: SearchCriterion
 
-    def __post_init__(self) -> None:
-        _require_child(self.left)
-        _require_child(self.right)
-
     def matches(self, record: PIR) -> bool:
-        return _evaluate(self, record)
+        return self.left.matches(record) or self.right.matches(record)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,34 +113,5 @@ class NotCriterion(SearchCriterion):
 
     operand: SearchCriterion
 
-    def __post_init__(self) -> None:
-        _require_child(self.operand)
-
     def matches(self, record: PIR) -> bool:
-        return _evaluate(self, record)
-
-
-def _evaluate(root: SearchCriterion, record: PIR) -> bool:
-    """Evaluate Composite trees without call-stack growth, retaining short-circuiting."""
-    pending = [(root, False)]
-    result = False
-    while pending:
-        node, resumed = pending.pop()
-        operation = type(node).matches
-        if resumed:
-            if operation is NotCriterion.matches:
-                result = not result
-            elif (operation is AndCriterion.matches and result) or (
-                operation is OrCriterion.matches and not result
-            ):
-                pending.append((node.right, False))
-        elif operation in (AndCriterion.matches, OrCriterion.matches):
-            pending.append((node, True))
-            pending.append((node.left, False))
-        elif operation is NotCriterion.matches:
-            pending.append((node, True))
-            pending.append((node.operand, False))
-        else:
-            # Honor custom matches overrides, including Composite subclasses.
-            result = node.matches(record)
-    return result
+        return not self.operand.matches(record)

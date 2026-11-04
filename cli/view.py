@@ -1,7 +1,6 @@
 """Terminal input/output and complete record formatting (Design section 8)."""
 
 import io
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -10,16 +9,11 @@ from cli.errors import CommandError
 from cli.literals import _parse_path
 from model.records import PIR
 from model.search import SavedCriterion
+from model.validation import format_time
 
 
 def _configure_stdio() -> None:
-    """Use UTF-8 before the first input read, without replacing embedded streams.
-
-    Windows console streams already support Unicode, but redirected streams
-    can otherwise inherit an ANSI code page. Retain native newlines/error policies.
-    A debugger may already have read stdin; never replace its buffered stream.
-    Such hosts must select UTF-8 before reading (for example, -X utf8 with pdb).
-    """
+    """Switch standard streams to UTF-8 so redirected Windows streams avoid ANSI code pages."""
     for name in ("stdin", "stdout", "stderr"):
         stream = getattr(sys, name)
         if isinstance(stream, io.TextIOWrapper) and (
@@ -30,8 +24,8 @@ def _configure_stdio() -> None:
             except io.UnsupportedOperation:
                 if name != "stdin":
                     raise
-                # Reconfiguring consumed input is forbidden. Keep decoder/buffer
-                # ownership with the debugger rather than losing pending input.
+                # Under a debugger such as pdb, stdin has already been read and
+                # cannot be reconfigured; keep the debugger's stream.
 
 
 class PIMView:
@@ -73,10 +67,7 @@ class PIMView:
             self.message(f"Type: {record.type.value}")
             for name, value in record.business_fields().items():
                 if isinstance(value, datetime):
-                    value = (
-                        f"{value.year:04d}-{value.month:02d}-{value.day:02d} "
-                        f"{value.hour:02d}:{value.minute:02d}"
-                    )
+                    value = format_time(value)
                 self.message(f"{name}: {value}")
 
     def show_criteria(self, items: tuple[SavedCriterion, ...]) -> None:
@@ -89,11 +80,10 @@ class PIMView:
         print(text)
 
     def error(self, reason: str) -> None:
-        reason = re.sub(r"^(?:ERROR\b\s*:?\s*)+", "", reason)
         self.message(f"ERROR {reason}")
 
     def _closed_input(self) -> None:
-        """Exceptional dirty-EOF diagnostic from the user-approved clarification."""
+        """Report that closed stdin ends a session with unsaved changes."""
         print(
             "ERROR Standard input is closed; terminating the session with unsaved changes.",
             file=sys.stderr,

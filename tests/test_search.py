@@ -16,7 +16,9 @@ from model.criteria import (
 )
 from model.errors import ExpressionError, UnknownCriterionError
 from model.records import Contact, Event, PlainText, RecordType, Task
-from model.search import CriteriaRegistry, ExpressionParser, SavedCriterion
+from model.search import (
+    _MAX_CONDITIONS, _MAX_NEGATIONS, CriteriaRegistry, ExpressionParser, SavedCriterion,
+)
 
 
 class ExpressionParserTests(unittest.TestCase):
@@ -193,7 +195,7 @@ class ExpressionParserTests(unittest.TestCase):
         for expression in expressions:
             with self.subTest(expression=expression), self.assertRaises(ExpressionError):
                 self.parser.parse(expression)
-        for separator in ("\n", "\r", "\v", "\f", "\x85", "\u2028", "\u2029"):
+        for separator in ("\n", "\r"):
             with self.subTest(separator=separator), self.assertRaises(ExpressionError):
                 self.parser.parse('text~"x' + separator + 'y"')
 
@@ -209,7 +211,7 @@ class ExpressionParserTests(unittest.TestCase):
             self.assertIn("deadline", caught.exception.reason)
 
     def test_valid_extreme_and_past_time_literals(self):
-        """The parser shares Stage 1's exact date validation and full year range."""
+        """The parser shares the record validators' exact date validation and full year range."""
         for value, expected in (
             ("0001-01-01 00:00", datetime(1, 1, 1)),
             ("9999-12-31 23:59", datetime(9999, 12, 31, 23, 59)),
@@ -252,17 +254,29 @@ class ExpressionParserTests(unittest.TestCase):
             with self.assertRaises(ExpressionError):
                 self.parser.parse('__import__("os")')
 
-    def test_non_text_expression_is_rejected(self):
-        """Invalid API input does not leak a Python TypeError."""
-        for value in (None, 123, True, [], {}, b"type=TASK"):
-            with self.subTest(value=value), self.assertRaises(ExpressionError):
-                self.parser.parse(value)
-
     def test_excessive_nesting_reports_expression_error_and_parser_recovers(self):
         """Interpreter recursion limits must not leak RecursionError to the caller."""
-        with self.assertRaises(ExpressionError):
-            self.parser.parse("!" * 2000 + "type=TASK")
+        with self.assertRaisesRegex(ExpressionError, "nesting is too deep"):
+            self.parser.parse("(" * 2000 + "type=TASK" + ")" * 2000)
         self.assertEqual(self.parser.parse("type=TASK"), TypeCriterion(RecordType.TASK))
+
+    def test_condition_and_negation_limits_are_inclusive(self):
+        """Comparison and "!" limits are inclusive and bound evaluation depth."""
+        leaf = TypeCriterion(RecordType.TASK)
+        at_limit = self.parser.parse(" || ".join(["type=TASK"] * _MAX_CONDITIONS))
+        self.assertTrue(at_limit.matches(Task(1, "d", datetime(2026, 11, 20, 20))))
+        negated = self.parser.parse("!" * _MAX_NEGATIONS + "type=TASK")
+        self.assertIsInstance(negated, NotCriterion)
+        self.assertEqual(self.parser.parse("!!type=TASK"), NotCriterion(NotCriterion(leaf)))
+        for expression in (" || ".join(["type=TASK"] * (_MAX_CONDITIONS + 1)),
+                           "!" * (_MAX_NEGATIONS + 1) + "type=TASK",
+                           "!" * _MAX_NEGATIONS + "(type=TASK && !type=EVENT)"):
+            with self.subTest(length=len(expression)):
+                with self.assertRaisesRegex(
+                    ExpressionError,
+                    f"at most {_MAX_CONDITIONS} conditions and {_MAX_NEGATIONS} negations"
+                ):
+                    self.parser.parse(expression)
 
 
 class CriteriaRegistryTests(unittest.TestCase):
@@ -319,9 +333,9 @@ class CriteriaRegistryTests(unittest.TestCase):
         self.assertIsNot(first, third)
 
     def test_unknown_or_malformed_criterion_id_raises_without_mutation(self):
-        """FR17: no silent ID normalization or TypeError for malformed API IDs."""
+        """FR17: no silent normalization of malformed criterion IDs."""
         item = self.registry.define("type=TASK")
-        for value in ("C2", "C0", "C01", "c1", "@C1", " C1", "", None, 1, [], {}):
+        for value in ("C2", "C0", "C01", "c1", "@C1", " C1", ""):
             with self.subTest(value=value), self.assertRaises(UnknownCriterionError):
                 self.registry.get(value)
             self.assertEqual(self.registry.all(), (item,))

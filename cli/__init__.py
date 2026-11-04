@@ -1,1 +1,1 @@
-"""Terminal adapters for the approved MVC application."""
+"""Terminal adapters for the MVC application."""

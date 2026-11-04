@@ -1,9 +1,7 @@
 """Stateless command grammar (Design section 7); no domain-value/search parsing."""
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 
 from cli.errors import CommandError
 from cli.literals import _LINE_BREAKS, _parse_path, _read_literal
@@ -21,26 +19,16 @@ _CREATE_FIELDS = {
 }
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True)
 class Command:
-    """Immutable syntax carrier, defensively copying outer and nested field maps."""
+    """Parsed command verb and its syntax-level arguments."""
 
     verb: str
-    arguments: Mapping[str, object]
-
-    def __init__(self, verb: str, arguments: dict[str, object]) -> None:
-        copied = {
-            key: MappingProxyType(dict(value)) if isinstance(value, Mapping) else value
-            for key, value in arguments.items()
-        }
-        object.__setattr__(self, "verb", verb)
-        object.__setattr__(self, "arguments", MappingProxyType(copied))
+    arguments: dict[str, object]
 
 
 def _record_id(text: str) -> int:
-    reason = (
-        f"Invalid record ID. Expected an ASCII decimal integer from 1 through {MAX_RECORD_ID}."
-    )
+    reason = "Invalid record ID. Expected a positive integer."
     if not re.fullmatch(r"[0-9]+", text):
         raise CommandError(reason)
     # Preserve leading-zero syntax without converting an unbounded digit string.
@@ -88,7 +76,7 @@ class CommandParser:
     """Parse command syntax only; search expressions remain untouched model input."""
 
     def parse(self, line: str) -> Command:
-        if not isinstance(line, str) or any(character in _LINE_BREAKS for character in line):
+        if any(character in _LINE_BREAKS for character in line):
             raise CommandError("Expected one line of command text without line breaks.")
         parts = line.lstrip().split(maxsplit=1)
         if not parts:

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from model.persistence import PIMFileStorage
 from model.records import PlainText, Task
+from model.search import _MAX_CONDITIONS, _MAX_NEGATIONS
 from model.validation import MAX_RECORD_ID
 
 
@@ -172,7 +173,7 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), b"invalid collection")
 
     def test_dirty_eof_at_command_and_all_confirmation_boundaries_is_nonzero(self):
-        """Q6: subprocess timeout proves no prompt loop, no overwrite or implicit save."""
+        """SRS 5.3: subprocess timeout proves no prompt loop, no overwrite or implicit save."""
         prefixes = (
             [],
             ['create PLAIN_TEXT text="original"'],
@@ -198,7 +199,7 @@ class EntrypointTests(unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), b"existing file")
 
     def test_clean_eof_status_and_eof_after_successful_save(self):
-        """Q6: clean EOF status is zero with no fabricated save; completed save stays true."""
+        """SRS 5.3: clean EOF status is zero with no fabricated save; completed save stays true."""
         result = self._run([])
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         self.assertNotIn("Saved collection", result.stdout)
@@ -210,7 +211,7 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(PIMFileStorage().read(self.path), (PlainText(1, "saved"),))
 
     def test_declined_exit_overwrite_then_eof_is_not_a_successful_save(self):
-        """FR33/Q6: n stops pending exit; later permanent EOF reports unsaved data."""
+        """FR33/SRS 5.3: n stops pending exit; later permanent EOF reports unsaved data."""
         self.path.write_bytes(b"existing")
         result = self._run([
             'create PLAIN_TEXT text="unsaved"', "exit", "s", _quoted(self.path), "n",
@@ -223,7 +224,7 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), b"existing")
 
     def test_failed_load_after_preliminary_save_then_eof_is_clean(self):
-        """FR36/Q6: actual process status reflects the independently completed save."""
+        """FR36/SRS 5.3: actual process status reflects the independently completed save."""
         incoming = self.directory / "bad.pim"
         incoming.write_bytes(b"bad")
         result = self._run([
@@ -267,16 +268,21 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(PIMFileStorage().read(self.path), (task2, task7))
 
     def test_long_valid_expression_and_invalid_branch_keep_cli_usable(self):
-        """Regression: valid flat chains cannot crash; a bad skipped branch reports ERROR."""
-        expression = " && ".join(["type=PLAIN_TEXT"] * 1500)
+        """Regression: limit-sized chains work; bad branches and oversized input report ERROR."""
+        expression = " && ".join(["type=PLAIN_TEXT"] * _MAX_CONDITIONS)
+        prefix = " && ".join(["type=PLAIN_TEXT"] * (_MAX_CONDITIONS - 2))
         result = self._run([
             'create PLAIN_TEXT text="note"', f"define {expression}", "search @C1",
-            f'search type=PLAIN_TEXT || ({expression}) || unknown~"x"',
+            f'search type=PLAIN_TEXT || ({prefix}) || unknown~"x"',
+            "search " + " && ".join(["type=PLAIN_TEXT"] * (_MAX_CONDITIONS + 1)),
+            # Without the negation limit, this depth overflowed recursive evaluation.
+            "search " + "!" * (9 * _MAX_NEGATIONS) + f"({expression})",
             "show all", "exit", "d",
         ])
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         self.assertEqual(result.stdout.count("ID: 1"), 3)
         self.assertIn("ERROR Unknown search field", result.stdout)
+        self.assertEqual(result.stdout.count("ERROR Search expression is too long"), 2)
         self.assertNotIn("Traceback", result.stdout)
         self.assertIn("Session ended.", result.stdout)
 

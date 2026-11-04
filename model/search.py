@@ -10,6 +10,8 @@ comparison := "type" "=" TYPE
 
 Parsing constructs the entire validated tree before any record evaluation.
 Only escaped double quotes and escaped backslashes are decoded in STRING.
+One expression has at most 100 comparisons and 100 "!" operators, which bounds
+the depth of the recursive Composite evaluation.
 """
 
 import re
@@ -32,6 +34,12 @@ from model.validation import _LINE_BREAKS, parse_time
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
+_MAX_CONDITIONS = 100
+_MAX_NEGATIONS = 100
+_TOO_LONG = (
+    f"Search expression is too long: at most {_MAX_CONDITIONS} conditions "
+    f"and {_MAX_NEGATIONS} negations are allowed."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +106,8 @@ class _ExpressionReader:
     def __init__(self, tokens: tuple[_Token, ...]) -> None:
         self._tokens = tokens
         self._index = 0
+        self._conditions = 0
+        self._negations = 0
 
     @property
     def _current(self) -> _Token:
@@ -140,6 +150,9 @@ class _ExpressionReader:
 
     def _unary(self) -> SearchCriterion:
         if self._accept("!"):
+            self._negations += 1
+            if self._negations > _MAX_NEGATIONS:
+                raise ExpressionError(_TOO_LONG)
             return NotCriterion(self._unary())
         if self._accept("("):
             root = self._or_expr()
@@ -148,7 +161,10 @@ class _ExpressionReader:
         return self._comparison()
 
     def _comparison(self) -> SearchCriterion:
-        field = self._expect("IDENTIFIER", "a field name").value
+        self._conditions += 1
+        if self._conditions > _MAX_CONDITIONS:
+            raise ExpressionError(_TOO_LONG)
+        field =self._expect("IDENTIFIER", "a field name").value
         if field == "type":
             self._expect("=", "= after type")
             value = self._expect("IDENTIFIER", "PLAIN_TEXT, TASK, EVENT or CONTACT").value
@@ -181,8 +197,6 @@ class ExpressionParser:
 
     def parse(self, expression: str) -> SearchCriterion:
         """Return a fully validated immutable AST, requiring complete input consumption."""
-        if not isinstance(expression, str):
-            raise ExpressionError("Search expression must be text.")
         try:
             return _ExpressionReader(_tokenize(expression))._parse()
         except RecursionError as error:
@@ -216,7 +230,7 @@ class CriteriaRegistry:
 
     def get(self, criterion_id: str) -> SavedCriterion:
         """Return an existing definition or raise UnknownCriterionError, without mutation."""
-        if not isinstance(criterion_id, str) or criterion_id not in self._items:
+        if criterion_id not in self._items:
             raise UnknownCriterionError(f"Unknown criterion {criterion_id!r}.")
         return self._items[criterion_id]
 

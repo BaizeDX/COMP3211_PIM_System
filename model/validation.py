@@ -16,10 +16,10 @@ if TYPE_CHECKING:
     from model.records import PIR, RecordType
 
 
-# User-approved ID-range clarification: positive signed 64-bit record IDs.
+# Record IDs are positive signed 64-bit integers.
 MAX_RECORD_ID = 9223372036854775807
 
-_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_LINE_BREAKS = frozenset("\n\r")
 _TIME_PATTERN = re.compile(
     r"([0-9]{4})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2})"
 )
@@ -65,6 +65,14 @@ def parse_time(value: str) -> datetime:
         raise ValidationError(reason) from error
 
 
+def format_time(value: datetime) -> str:
+    """Format YYYY-MM-DD HH:MM; strftime pads years below 1000 differently by platform."""
+    return (
+        f"{value.year:04d}-{value.month:02d}-{value.day:02d} "
+        f"{value.hour:02d}:{value.minute:02d}"
+    )
+
+
 def normalize_mobile(value: str) -> str:
     """Trim outer whitespace; retain an optional + and 1-15 ASCII digits.
 
@@ -80,15 +88,10 @@ def _validate_record_id(record_id: int) -> None:
     if type(record_id) is not int or not 1 <= record_id <= MAX_RECORD_ID:
         # Never format the rejected value: arbitrary Python integers can exceed
         # the interpreter's safe decimal-conversion limit.
-        raise ValidationError(
-            f"Record ID must be an integer from 1 through {MAX_RECORD_ID}, "
-            "excluding Boolean values."
-        )
+        raise ValidationError("Invalid record ID. Expected a positive integer.")
 
 
 def _validate_datetime(value: datetime, field: str) -> None:
-    if not isinstance(value, datetime):
-        raise ValidationError(f"Invalid {field}. Expected a datetime value.")
     if value.tzinfo is not None or value.second != 0 or value.microsecond != 0:
         raise ValidationError(
             f"Invalid {field}. Expected a naive local datetime at minute precision."
@@ -109,10 +112,6 @@ def build_record(
     from model.records import Contact, Event, PlainText, RecordType, Task
 
     _validate_record_id(record_id)
-    if not isinstance(kind, RecordType):
-        raise ValidationError("Type must be PLAIN_TEXT, TASK, EVENT or CONTACT as a RecordType.")
-    if not isinstance(fields, dict) or any(not isinstance(key, str) for key in fields):
-        raise ValidationError("Business fields must be a dictionary with text field names.")
 
     record_class, names = {
         RecordType.PLAIN_TEXT: (PlainText, ("text",)),

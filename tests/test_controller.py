@@ -70,7 +70,7 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(self.controller._running)
 
     def test_execute_continuation_contract(self):
-        """D 8: execute returns True to continue and False after an approved exit."""
+        """D 8: execute returns True to continue and False after a confirmed exit."""
         controller = PIMController(self.service, self.parser, self.view)
         with redirect_stdout(io.StringIO()):
             self.assertIs(controller.execute(self.parser.parse("show all")), True)
@@ -396,7 +396,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(output.count("ERROR "), 3)
 
     def test_recoverable_interrupt_at_each_input_boundary_preserves_state(self):
-        """R13/Q6: cancel uncommitted input only, with bounded recovery at all prompts."""
+        """SRS 5.3: cancel uncommitted input only, with bounded recovery at all prompts."""
         scripts = (
             [KeyboardInterrupt],
             ['create PLAIN_TEXT text="original"', KeyboardInterrupt],
@@ -450,7 +450,7 @@ class ControllerTests(unittest.TestCase):
                 controller.run()
 
     def test_dirty_permanent_eof_at_all_prompts_never_mutates_or_loops(self):
-        """Q6: nonzero status, stderr warning, no implicit save/discard/pending mutation."""
+        """SRS 5.3: nonzero status, stderr warning, no implicit save/discard/pending mutation."""
         scripts = (
             [],
             ['create PLAIN_TEXT text="original"'],
@@ -480,7 +480,7 @@ class ControllerTests(unittest.TestCase):
                 self.assertNotIn("Session ended.", output)
 
     def test_clean_eof_and_eof_after_completed_save_do_not_claim_discard(self):
-        """Q6: EOF reflects the current dirty state and never fabricates a save."""
+        """SRS 5.3: EOF reflects the current dirty state and never fabricates a save."""
         output, err, status, count = self._run([EOFError])
         self.assertEqual((output, err, status, count), ("", "", 0, 1))
         self._record()
@@ -491,7 +491,7 @@ class ControllerTests(unittest.TestCase):
         self.assertNotIn("Session ended.", output)
 
     def test_eof_after_preliminary_save_and_failed_load_keeps_clean_result(self):
-        """Q6/FR36: EOF cannot undo an independently completed save."""
+        """SRS 5.3/FR36: EOF cannot undo an independently completed save."""
         original = self._record()
         self.incoming.write_bytes(b"bad file")
         output, err, status, count = self._run([

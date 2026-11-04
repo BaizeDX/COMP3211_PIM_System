@@ -50,11 +50,9 @@ class PIMService:
         A duplicate error carries numerically sorted matching IDs and changes no
         state. Only a caller-confirmed retry should set allow_duplicate=True.
         """
-        if type(allow_duplicate) is not bool:
-            raise ValidationError("allow_duplicate must be a Boolean value.")
         if self._high_water >= MAX_RECORD_ID:
             raise ValidationError(
-                f"Record ID range is exhausted at {MAX_RECORD_ID}. "
+                "Record IDs are exhausted. "
                 "Cannot create another record; existing records remain usable."
             )
         candidate = build_record(self._high_water + 1, kind, fields)
@@ -94,7 +92,7 @@ class PIMService:
         """
         original = self.get(record_id)
         fields = original.business_fields()
-        if not isinstance(field, str) or field not in fields:
+        if field not in fields:
             raise ValidationError(
                 f"Field {field!r} is not editable for {original.type.value}. "
                 f"Expected one of: {', '.join(fields)}."

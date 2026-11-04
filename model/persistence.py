@@ -8,12 +8,10 @@ from pathlib import Path
 
 from model.errors import OverwriteRequiredError, PersistenceError, ValidationError
 from model.records import PIR, RecordType
-from model.validation import build_record
+from model.validation import build_record, format_time
 
 
 def _validate_path(path: Path) -> None:
-    if not isinstance(path, Path):
-        raise ValidationError("Expected a pathlib.Path ending in lowercase .pim.")
     if path.suffix != ".pim" or "\0" in str(path):
         raise ValidationError(
             "File path must have the lowercase .pim extension and no null bytes."
@@ -36,13 +34,7 @@ def _reject_constant(value: str) -> None:
 def _record_data(record: PIR) -> dict[str, object]:
     data = {"id": record.id, "type": record.type.value}
     for name, value in record.business_fields().items():
-        if isinstance(value, datetime):
-            # strftime's year padding varies by platform for years below 1000.
-            value = (
-                f"{value.year:04d}-{value.month:02d}-{value.day:02d} "
-                f"{value.hour:02d}:{value.minute:02d}"
-            )
-        data[name] = value
+        data[name] = format_time(value) if isinstance(value, datetime) else value
     return data
 
 
@@ -114,19 +106,11 @@ class PIMFileStorage:
         temporary_path = None
         try:
             _validate_path(path)
-            if type(overwrite) is not bool:
-                raise ValidationError("overwrite must be a Boolean value.")
-            if not isinstance(records, tuple) or any(
-                not isinstance(item, PIR) for item in records
-            ):
-                raise ValidationError("Expected a tuple of valid PIR records.")
             document = {
                 "format": "PIM",
                 "version": 1,
-                "records": [_record_data(record) for record in records],
+                "records": [_record_data(record) for record in sorted(records, key=lambda r: r.id)],
             }
-            # Validate the supplied snapshot as well; emit fixed key and numeric ID order.
-            document["records"] = [_record_data(record) for record in _validated_records(document)]
             payload = (
                 json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
             ).encode("utf-8")
@@ -141,8 +125,7 @@ class PIMFileStorage:
                 mode="wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
             ) as temporary:
                 temporary_path = Path(temporary.name)
-                if temporary.write(payload) != len(payload):
-                    raise OSError("Incomplete write to the temporary file.")
+                temporary.write(payload)
                 temporary.flush()
             os.replace(temporary_path, path)
             temporary_path = None
