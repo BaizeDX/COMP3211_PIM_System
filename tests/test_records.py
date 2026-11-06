@@ -61,7 +61,7 @@ class RecordTests(unittest.TestCase):
                         type(record)(record_id, **record.business_fields())
 
     def test_signed_64_bit_id_boundary_in_every_constructor_and_factory(self):
-        """All four direct/factory paths accept MAX and reject MAX+1."""
+        """All four direct/factory paths accept MAX; MAX+1 is too large, 0/-1 not positive."""
         self.assertEqual(MAX_RECORD_ID, 9223372036854775807)
         for original in self.records:
             fields = original.business_fields()
@@ -70,16 +70,17 @@ class RecordTests(unittest.TestCase):
             with self.subTest(kind=original.type):
                 maximum = type(original)(MAX_RECORD_ID, **fields)
                 self.assertEqual(build_record(MAX_RECORD_ID, original.type, strings), maximum)
-                for invalid in (MAX_RECORD_ID + 1, 10 ** 5000):
+                for invalid, reason in (
+                    (MAX_RECORD_ID + 1, "Record ID is too large."), (10 ** 5000, "Record ID is too large."),
+                    (0, "Invalid record ID. Expected a positive integer."), (-1, "Invalid record ID. Expected a positive integer."),
+                ):
                     for constructor in (
                         lambda: type(original)(invalid, **fields),
                         lambda: build_record(invalid, original.type, strings),
                     ):
                         with self.assertRaises(ValidationError) as caught:
                             constructor()
-                        self.assertEqual(
-                            str(caught.exception), "Invalid record ID. Expected a positive integer."
-                        )
+                        self.assertEqual(str(caught.exception), reason)
 
     def test_direct_constructors_reject_invalid_text_fields(self):
         """Every required text field is validated without relying on build_record."""
@@ -87,7 +88,7 @@ class RecordTests(unittest.TestCase):
             for name, value in record.business_fields().items():
                 if isinstance(value, datetime):
                     continue
-                for invalid in ("", "___", "\nvalid", "valid\r", None, 123):
+                for invalid in ("", "___", "\nvalid", "valid\r", "valid\u2028", "a\u2029b", None, 123):
                     fields = record.business_fields()
                     fields[name] = invalid
                     with self.subTest(kind=record.type, field=name, value=invalid):

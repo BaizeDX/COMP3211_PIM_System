@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 # Record IDs are positive signed 64-bit integers.
 MAX_RECORD_ID = 9223372036854775807
 
-_LINE_BREAKS = frozenset("\n\r")
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
 _TIME_PATTERN = re.compile(
     r"([0-9]{4})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2})"
 )
@@ -85,10 +85,12 @@ def normalize_mobile(value: str) -> str:
 
 
 def _validate_record_id(record_id: int) -> None:
-    if type(record_id) is not int or not 1 <= record_id <= MAX_RECORD_ID:
-        # Never format the rejected value: arbitrary Python integers can exceed
-        # the interpreter's safe decimal-conversion limit.
+    # Never format the rejected value: arbitrary Python integers can exceed
+    # the interpreter's safe decimal-conversion limit.
+    if type(record_id) is not int or record_id < 1:
         raise ValidationError("Invalid record ID. Expected a positive integer.")
+    if record_id > MAX_RECORD_ID:
+        raise ValidationError("Record ID is too large.")
 
 
 def _validate_datetime(value: datetime, field: str) -> None:

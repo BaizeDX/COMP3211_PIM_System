@@ -130,6 +130,22 @@ class EntrypointTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stdout)
         self.assertIn("ID: 1\nType: PLAIN_TEXT\ntext: safe", result.stdout)
 
+    def test_unicode_line_separators_rejected_from_stdin_and_files(self):
+        """U+2028/U+2029 in commands or loaded files are rejected; the CLI stays usable."""
+        unicode_file = self.directory / "separator.pim"
+        unicode_file.write_text(
+            '{"format":"PIM","version":1,"records":'
+            '[{"id":1,"type":"PLAIN_TEXT","text":"a\\u2029b"}]}', encoding="utf-8",
+        )
+        result = self._run([
+            'create PLAIN_TEXT text="a\u2028b"', 'search text~"a\u2029b"',
+            f"load {_quoted(unicode_file)}", "show all", "exit",
+        ])
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(result.stdout.count("ERROR "), 3)
+        self.assertIn("Collection is empty", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
     def test_invalid_input_recovers_without_traceback(self):
         """FR28/NFR2: representative command/field/search/file failures remain usable."""
         result = self._run([

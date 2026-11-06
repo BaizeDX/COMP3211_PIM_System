@@ -99,7 +99,7 @@ class LeafCriterionTests(unittest.TestCase):
         for field in ("deadline", "type", "id", "Text", "unknown"):
             with self.subTest(field=field), self.assertRaises(ExpressionError):
                 TextCriterion(field, "x")
-        for value in ("", "\n", "x\r", "a\r\nb"):
+        for value in ("", "\n", "x\r", "a\r\nb", "x\u2028y", "x\u2029y", "\x85x"):
             with self.subTest(substring=value), self.assertRaises(ExpressionError):
                 TextCriterion("text", value)
 

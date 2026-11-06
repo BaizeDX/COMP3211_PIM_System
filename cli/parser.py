@@ -33,11 +33,11 @@ def _record_id(text: str) -> int:
         raise CommandError(reason)
     # Preserve leading-zero syntax without converting an unbounded digit string.
     digits = text.lstrip("0")
-    maximum = str(MAX_RECORD_ID)
-    if not digits or len(digits) > len(maximum) or (
-        len(digits) == len(maximum) and digits > maximum
-    ):
+    if not digits:
         raise CommandError(reason)
+    maximum = str(MAX_RECORD_ID)
+    if len(digits) > len(maximum) or (len(digits) == len(maximum) and digits > maximum):
+        raise CommandError("Record ID is too large.")
     return int(digits)
 
 

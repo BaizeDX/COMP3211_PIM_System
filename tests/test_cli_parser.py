@@ -99,18 +99,22 @@ class CommandParserTests(unittest.TestCase):
         self.assertEqual(self.parser.parse("show 0002").arguments["record_id"], 2)
 
     def test_record_id_range_checked_before_decimal_conversion(self):
-        """Accept MAX/leading zeroes; reject MAX+1 and enormous inputs in every ID verb."""
+        """Accept MAX/leading zeroes; too-large and non-positive IDs get distinct errors."""
         for verb in ("show", "delete", "update"):
             suffix = ' text="changed"' if verb == "update" else ""
             for digits in (str(MAX_RECORD_ID), "0" * 5000 + str(MAX_RECORD_ID)):
                 command = self.parser.parse(f"{verb} {digits}{suffix}")
                 self.assertEqual(command.arguments["record_id"], MAX_RECORD_ID)
-            for digits in (str(MAX_RECORD_ID + 1), "9" * 4300, "9" * 5000, "0" * 5000):
-                with self.assertRaises(CommandError) as caught:
-                    self.parser.parse(f"{verb} {digits}{suffix}")
-                self.assertEqual(
-                    str(caught.exception), "Invalid record ID. Expected a positive integer."
-                )
+            for digits, reason in (
+                (str(MAX_RECORD_ID + 1), "Record ID is too large."), ("9" * 4300, "Record ID is too large."),
+                ("9" * 5000, "Record ID is too large."), ("0" * 5000, "Invalid record ID. Expected a positive integer."), ("0", "Invalid record ID. Expected a positive integer."),
+                ("-1", "Invalid record ID. Expected a positive integer."), ("abc", "Invalid record ID. Expected a positive integer."),
+            ):
+                with self.subTest(verb=verb, digits=digits[:20]):
+                    with self.assertRaises(CommandError) as caught:
+                        self.parser.parse(f"{verb} {digits}{suffix}")
+                    # Exact text: the rejected digits are never echoed back.
+                    self.assertEqual(str(caught.exception), reason)
 
     def test_missing_extra_repeated_and_unknown_create_fields(self):
         """Command grammar checks exact assignment sets, never business values."""
@@ -175,7 +179,8 @@ class CommandParserTests(unittest.TestCase):
 
     def test_single_line_check_and_parser_reuse_without_terminal_io(self):
         """Syntax failures do not retain reader state or call the model/search parser."""
-        for line in ('show all\n', 'create PLAIN_TEXT text="a\rb"'):
+        for line in ('show all\n', 'create PLAIN_TEXT text="a\rb"',
+                     'create PLAIN_TEXT text="a\u2028b"', 'search text~"a\u2029b"'):
             with self.subTest(line=line), self.assertRaises(CommandError):
                 self.parser.parse(line)
         with patch("builtins.input", side_effect=AssertionError("Unexpected input")), patch(

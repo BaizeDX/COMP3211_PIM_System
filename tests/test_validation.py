@@ -22,8 +22,12 @@ class TextValidationTests(unittest.TestCase):
                 normalize_text(value)
 
     def test_line_breaks_rejected_before_trimming(self):
-        """Single-line rule includes leading and trailing line breaks."""
-        for separator in ("\n", "\r", "\r\n"):
+        """Single-line rule includes leading/trailing and Unicode line breaks."""
+        separators = (
+            "\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e",
+            "\x85", "\u2028", "\u2029",
+        )
+        for separator in separators:
             for value in (separator + "note", "note" + separator, "a" + separator + "b"):
                 with self.subTest(value=value), self.assertRaises(ValidationError):
                     normalize_text(value)
@@ -55,7 +59,7 @@ class MobileValidationTests(unittest.TestCase):
 
     def test_line_breaks_are_not_trimmed_into_valid_mobile(self):
         """The stored-field single-line rule also applies to mobile numbers."""
-        for separator in ("\n", "\r"):
+        for separator in ("\n", "\r", "\v", "\f", "\x85", "\u2028", "\u2029"):
             for value in (separator + "123", "123" + separator, "12" + separator + "3"):
                 with self.subTest(value=value), self.assertRaises(ValidationError):
                     normalize_mobile(value)
@@ -171,9 +175,16 @@ class RecordFactoryTests(unittest.TestCase):
 
     def test_invalid_ids_rejected_without_coercion(self):
         """Signed 64-bit IDs exclude Boolean, floats, strings and values above MAX."""
-        for record_id in (0, -1, True, False, 1.0, "1", None, MAX_RECORD_ID + 1, 10**100):
-            with self.subTest(record_id=record_id), self.assertRaises(ValidationError):
+        for record_id, reason in (
+            (0, "Invalid record ID. Expected a positive integer."), (-1, "Invalid record ID. Expected a positive integer."), (True, "Invalid record ID. Expected a positive integer."), (False, "Invalid record ID. Expected a positive integer."),
+            (1.0, "Invalid record ID. Expected a positive integer."), ("1", "Invalid record ID. Expected a positive integer."), (None, "Invalid record ID. Expected a positive integer."),
+            (MAX_RECORD_ID + 1, "Record ID is too large."), (10**100, "Record ID is too large."), (10**5000, "Record ID is too large."),
+        ):
+            with self.subTest(record_id=type(record_id).__name__), self.assertRaises(
+                ValidationError
+            ) as caught:
                 build_record(record_id, RecordType.PLAIN_TEXT, {"text": "note"})
+            self.assertEqual(str(caught.exception), reason)
         self.assertEqual(
             build_record(MAX_RECORD_ID, RecordType.PLAIN_TEXT, {"text": "note"}).id,
             MAX_RECORD_ID,

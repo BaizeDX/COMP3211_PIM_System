@@ -195,7 +195,7 @@ class ExpressionParserTests(unittest.TestCase):
         for expression in expressions:
             with self.subTest(expression=expression), self.assertRaises(ExpressionError):
                 self.parser.parse(expression)
-        for separator in ("\n", "\r"):
+        for separator in ("\n", "\r", "\v", "\f", "\x85", "\u2028", "\u2029"):
             with self.subTest(separator=separator), self.assertRaises(ExpressionError):
                 self.parser.parse('text~"x' + separator + 'y"')
 

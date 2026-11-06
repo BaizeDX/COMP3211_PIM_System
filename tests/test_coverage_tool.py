@@ -1,13 +1,16 @@
 """Verify coverage accounting independently of production model implementation."""
 
+import dis
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import trace
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.report_model_coverage import (
     _MODEL_TEST_MODULES, _executable_lines, _inventory, _report,
@@ -94,8 +97,9 @@ class CoverageToolTests(unittest.TestCase):
         })
         self.assertEqual((rows[0]["covered"], rows[0]["total"], rows[0]["missing"]), (1, 1, []))
 
-    def test_annotate_child_code_objects_are_not_executable_lines(self):
-        """Lazy annotation bodies (Python 3.14+) never run under tests; sibling code counts."""
+    def test_annotate_child_code_objects_are_excluded_by_policy(self):
+        """Lazy annotation functions (PEP 649) are excluded as a measurement policy; they
+        evaluate type annotations, not model behaviour. Sibling code still counts."""
         code = compile(
             'value = 1\n'
             'def __annotate__(format):\n'
@@ -106,6 +110,41 @@ class CoverageToolTests(unittest.TestCase):
         children = {c.co_name for c in code.co_consts if isinstance(c, type(code))}
         self.assertEqual(children, {"__annotate__", "kept"})
         self.assertEqual(_executable_lines(code), {1, 2, 4, 5})
+
+    def test_only_positive_line_starts_are_counted(self):
+        """None (Python 3.13+) and 0 line starts are ignored; normal line numbers count."""
+        code = types.SimpleNamespace(co_consts=())
+        starts = [(0, None), (2, 0), (4, 7), (6, None), (8, 9)]
+        with patch("tools.report_model_coverage.dis.findlinestarts", return_value=starts):
+            self.assertEqual(_executable_lines(code), {7, 9})
+
+    @unittest.skipUnless(sys.version_info >= (3, 14), "Requires PEP 649 lazy annotations")
+    def test_compiler_generated_annotate_is_excluded_but_shared_lines_still_count(self):
+        """Real __annotate__ lines drop out; a line shared with normal code counts once."""
+        code = compile(
+            'def spread(\n'
+            '    value: int,\n'
+            ') -> int:\n'
+            '    return value\n'
+            'def shared(value: int) -> int: return value\n', "sample.py", "exec",
+        )
+
+        def walk(node):
+            yield node
+            for constant in node.co_consts:
+                if isinstance(constant, types.CodeType):
+                    yield from walk(constant)
+
+        annotate_lines = {
+            line for node in walk(code) if node.co_name == "__annotate__"
+            for _, line in dis.findlinestarts(node) if line
+        }
+        self.assertIn(2, annotate_lines)
+        self.assertIn(5, annotate_lines)
+        lines = _executable_lines(code)
+        self.assertNotIn(2, lines)
+        self.assertIn(5, lines)
+        self.assertEqual(lines, {1, 4, 5})
 
     def test_report_aggregate_uses_line_totals_instead_of_average_percentages(self):
         """Two modules with 1/1 and 0/3 coverage total 1/4 (25%), not 50%."""

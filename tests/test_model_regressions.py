@@ -6,13 +6,22 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from model.criteria import AndCriterion, OrCriterion, TypeCriterion
+from model.criteria import AndCriterion, NotCriterion, OrCriterion, TypeCriterion
 from model.errors import DuplicateRecordError, ExpressionError, PersistenceError, ValidationError
 from model.persistence import PIMFileStorage
 from model.records import Contact, PlainText, RecordType, Task
-from model.search import _MAX_CONDITIONS, CriteriaRegistry, ExpressionParser
+from model.search import _MAX_CONDITIONS, _MAX_NEGATIONS, CriteriaRegistry, ExpressionParser
 from model.service import PIMService
 from model.validation import MAX_RECORD_ID
+
+
+def _height(node):
+    """Test-only AST height: a leaf is 1; each And/Or/Not adds one level."""
+    if isinstance(node, NotCriterion):
+        return 1 + _height(node.operand)
+    if isinstance(node, (AndCriterion, OrCriterion)):
+        return 1 + max(_height(node.left), _height(node.right))
+    return 1
 
 
 class ModelRegressionTests(unittest.TestCase):
@@ -227,6 +236,45 @@ class ModelRegressionTests(unittest.TestCase):
         )
         self.assertFalse(root.matches(PlainText(1, "note")))
         self.assertTrue(root.matches(Contact(2, "A", "B", "001")))
+
+    def test_limit_sized_structures_evaluate_directly_and_saved_on_any_collection(self):
+        """Every limit-sized shape evaluates without RecursionError and saved searches rerun."""
+        conjunction = " && ".join(["type=PLAIN_TEXT"] * _MAX_CONDITIONS)
+        negated = _MAX_NEGATIONS % 2 == 1
+        structures = {
+            "and chain": (conjunction, {"note"}),
+            "or chain": (" || ".join(["type=TASK"] * (_MAX_CONDITIONS - 1) + ["type=CONTACT"]),
+                         {"contact"}),
+            "repeated negation": ("!" * _MAX_NEGATIONS + "type=PLAIN_TEXT",
+                                  {"contact"} if negated else {"note"}),
+            "nested parentheses": ("(" * 50 + "type=CONTACT" + ")" * 50, {"contact"}),
+            "both limits": ("!" * _MAX_NEGATIONS + f"({conjunction})",
+                            {"contact"} if negated else {"note"}),
+        }
+        for structure, (expression, expected) in structures.items():
+            parser = ExpressionParser()
+            self.assertLessEqual(_height(parser.parse(expression)),
+                                 _MAX_CONDITIONS + _MAX_NEGATIONS)
+            service = PIMService(PIMFileStorage(), CriteriaRegistry(parser), parser)
+            saved = service.define_criterion(expression)
+            names = {}
+            for collection in ("empty", "nonempty"):
+                if collection == "nonempty":
+                    names[service.create(RecordType.PLAIN_TEXT, {"text": "note"}).id] = "note"
+                    names[service.create(
+                        RecordType.CONTACT, {"name": "A", "address": "B", "mobile": "001"}
+                    ).id] = "contact"
+                for mode in ("direct", "saved"):
+                    with self.subTest(structure=structure, collection=collection, mode=mode):
+                        try:
+                            if mode == "direct":
+                                found = service.search(expression)
+                            else:
+                                found = service.search_saved(saved.id)
+                        except RecursionError:
+                            self.fail("RecursionError leaked from search evaluation")
+                        wanted = expected if collection == "nonempty" else set()
+                        self.assertEqual({names[record.id] for record in found}, wanted)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,8 @@ def _executable_lines(code: CodeType) -> set[int]:
     """Count distinct positive bytecode source lines recursively, not comments/blank lines."""
     lines = {line for _, line in dis.findlinestarts(code) if line is not None and line > 0}
     for constant in code.co_consts:
-        # Python 3.14+ lazy annotation functions run only when annotations are read.
+        # Lazy annotation functions (PEP 649) are excluded as a measurement policy;
+        # they evaluate type annotations, not model behaviour.
         if isinstance(constant, CodeType) and constant.co_name != "__annotate__":
             lines.update(_executable_lines(constant))
     return lines

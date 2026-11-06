@@ -286,6 +286,21 @@ class StorageTests(unittest.TestCase):
             with self.subTest(entry=entry), self.assertRaises(PersistenceError):
                 self.store.read(self.path)
 
+    def test_unicode_line_separators_in_loaded_fields_are_rejected(self):
+        """The single-line rule applies to file content, including Unicode separators."""
+        for separator in ("\v", "\f", "\x1c", "\x85", "\u2028", "\u2029"):
+            for record in (
+                {"id": 1, "type": "PLAIN_TEXT", "text": f"a{separator}b"},
+                {"id": 1, "type": "CONTACT", "name": "A", "address": f"x{separator}y",
+                 "mobile": "001"},
+            ):
+                self.path.write_text(json.dumps(
+                    {"format": "PIM", "version": 1, "records": [record]}
+                ), encoding="utf-8")
+                with self.subTest(separator=separator, type=record["type"]):
+                    with self.assertRaisesRegex(PersistenceError, "line breaks"):
+                        self.store.read(self.path)
+
     def test_duplicate_record_ids_are_rejected(self):
         """FR25: even valid different records cannot share one saved ID."""
         document = self._document()
